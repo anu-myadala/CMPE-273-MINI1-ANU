@@ -2,7 +2,7 @@
 // NYC 311 Service Requests dataset, 2020-present
 //
 // Build:  cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-// Run:    ./build/src/phase1/phase1  <path/to/311_data.csv>  [max_records]
+// Run:    ./build/src/phase1/phase1  <csv_file> [csv_file2 ...]
 
 #include <cstdlib>
 #include <fstream>
@@ -11,6 +11,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "Benchmark.hpp"
 #include "DataStore.hpp"
@@ -24,20 +25,21 @@ static void printSeparator() {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: phase1 <csv_file> [max_records]\n";
+        std::cerr << "Usage: phase1 <csv_file> [csv_file2 ...]\n";
         return EXIT_FAILURE;
     }
 
-    const std::string filepath = argv[1];
-    const size_t max_records   = (argc >= 3)
-        ? static_cast<size_t>(std::stoull(argv[2]))
-        : std::numeric_limits<size_t>::max();
+    // Collect all file arguments
+    std::vector<std::string> files;
+    for (int i = 1; i < argc; ++i) {
+        files.emplace_back(argv[i]);
+    }
 
     // -----------------------------------------------------------------------
-    // 1. Load data
+    // 1. Load data (serial, one file at a time)
     // -----------------------------------------------------------------------
     std::cout << "=== Phase 1: Serial AoS ===\n";
-    std::cout << "Loading: " << filepath << "\n";
+    std::cout << "Loading " << files.size() << " file(s)...\n";
 
     auto mem_before = MemoryStats::capture();
 
@@ -45,7 +47,12 @@ int main(int argc, char* argv[]) {
     load_timer.start();
 
     DataStore store;
-    try { store.load(filepath, max_records); }
+    try {
+        for (const auto& filepath : files) {
+            std::cout << "  Loading: " << filepath << "\n";
+            store.load(filepath);
+        }
+    }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return EXIT_FAILURE;

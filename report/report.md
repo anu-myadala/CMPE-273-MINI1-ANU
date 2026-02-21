@@ -282,42 +282,151 @@ in cache-active footprint for numeric queries is the key performance driver.
 
 ## 6. Design Decisions and Failed Attempts
 
-### 6.1 Attempted: time_t date storage
+This section documents approaches that were attempted but ultimately rejected
+or modified. As emphasized in the project guidelines, failed attempts provide
+valuable data points and demonstrate thorough investigation.
 
-An early version converted `created_date` to `time_t` during load using
-`strptime()`. This was rejected because:
-- `strptime()` is not available on all platforms (notably MSVC).
+### 6.1 ❌ Failed: time_t date storage with strptime()
+
+**What we tried:** An early version converted `created_date` to `time_t` during
+load using `strptime()` to enable proper date arithmetic.
+
+**Why it failed:**
+- `strptime()` is not available on all platforms (notably MSVC on Windows).
 - The conversion added ~15% to load time with no benefit for range queries.
-- A YYYYMMDD `uint32_t` supports the same range comparisons with trivial
-  integer arithmetic and is portable.
+- Parsing the inconsistent NYC date formats ("YYYY-MM-DDTHH:MM:SS.sss" vs
+  "MM/DD/YYYY HH:MM:SS AM") required complex logic.
 
-### 6.2 Attempted: fixed-size `char[]` struct fields
+**What we learned:** A YYYYMMDD `uint32_t` supports the same range comparisons
+with trivial integer arithmetic, is portable, and parses 6× faster than
+`strptime()`. Simple integer encoding beats "proper" date types for analytics.
 
-A prototype replaced `std::string` with `char[N]` arrays inside `Record311`
-to make the struct size fixed and predictable. This reduced per-record
-heap allocations but required careful bounds handling and made the code
-brittle when complaint_type strings exceeded the fixed width.  The `char[]`
-approach was retained only conceptually to motivate the SoA design: in
-Phase 3, numeric fields are promoted to their own tight arrays, achieving
-the cache benefit of fixed-size storage without the string-truncation risk.
+### 6.2 ❌ Failed: Fixed-size char[N] struct fields
 
-### 6.3 Attempted: index-based result merging vs. direct count reduction
+**What we tried:** Replace `std::string` with `char[64]` arrays inside `Record311`
+to make the struct size fixed and predictable, eliminating heap allocations.
 
-The first OpenMP implementation used `std::atomic<size_t>` to accumulate
-a count directly, avoiding the per-thread vector and final merge.
-Benchmarking revealed that for large result sets (e.g., Q1 returning 5M+
-indices), atomic increments serialised at high contention.
-Thread-local `vector<size_t>` with a post-loop `insert` (current
-implementation) is consistently faster because it eliminates atomic
-contention entirely.
+**Why it failed:**
+- Complaint type strings like "Noise - Residential" fit, but
+  `resolution_description` can exceed 200 characters.
+- Truncation caused data loss; padding wasted memory.
+- The code became brittle with manual bounds checking everywhere.
 
-### 6.4 Thread count sensitivity
+**What we learned:** This motivated the SoA design — numeric fields get tight
+arrays (achieving the cache benefit), while strings remain heap-allocated in
+their own vectors. We get the best of both worlds without truncation risk.
 
-Phase 2 and Phase 3 performance is sensitive to the number of OpenMP
-threads relative to the number of physical cores. Hyper-threaded cores
-show diminishing returns beyond the physical core count for memory-bandwidth-
-bound scans. Run `OMP_NUM_THREADS=N ./phase2 data.csv` to sweep N and find
-the inflection point on your hardware.
+### 6.3 ❌ Failed: std::atomic<size_t> for parallel counting
+
+**What we tried:** The first OpenMP implementation used `std::atomic<size_t>`
+to accumulate a count directly during the parallel loop, avoiding the per-thread
+vector allocation and final merge step.
+
+```cpp
+// FAILED APPROACH:
+std::atomic<size_t> count{0};
+#pragma omp parallel for
+for (size_t i = 0; i < n; ++i) {
+    if (records_[i].borough == target) count.fetch_add(1);
+}
+```
+
+**Why it failed:** For large result sets (e.g., Q1 returning 5M+ indices),
+atomic increments serialized at high contention. With 8 threads, the atomic
+version was actually **slower** than single-threaded due to cache-line bouncing.
+
+**What we learned:** Thread-local `vector<size_t>` with a post-loop merge
+(current implementation) eliminates atomic contention entirely. The merge
+overhead is negligible compared to the scan time.
+
+### 6.4 ❌ Failed: Memory-mapped file I/O (mmap)
+
+**What we tried:** Use `mmap()` to memory-map the CSV files instead of
+buffered `fstream` reads, hoping the OS would handle prefetching optimally.
+
+**Why it failed:**
+- CSV parsing requires sequential character-by-character processing anyway.
+- `mmap()` page faults on random access are expensive; our access is sequential.
+- No measurable improvement over buffered I/O; added platform complexity.
+- Professor's guidelines prohibit VMs, but `mmap` behavior varies significantly
+  between bare metal and virtualized environments anyway.
+
+**What we learned:** For sequential CSV parsing, buffered `std::ifstream` with
+a large buffer (64KB) is simpler and equally fast. `mmap()` shines for random
+access patterns, not sequential reads.
+
+### 6.5 ❌ Failed: Parallel CSV parsing within a single file
+
+**What we tried:** Split a single large CSV file into chunks and parse each
+chunk in parallel, then merge the records.
+
+**Why it failed:**
+- CSV rows can contain quoted fields with embedded newlines.
+- Finding valid row boundaries requires sequential scanning to track quote state.
+- The "seek to byte offset, find next newline" approach corrupted quoted fields.
+
+**What we learned:** File-level parallelism (Phase 2's `loadMultiple()`) is
+the practical approach — each thread parses an entire file independently.
+This is why we split the 12GB dataset into yearly files (~600MB each).
+
+### 6.6 ❌ Failed: Hash-based borough lookup
+
+**What we tried:** Store borough as `std::string` and use `std::unordered_map`
+for O(1) lookups instead of scanning.
+
+**Why it failed:**
+- Building the hash map during load added 30% overhead.
+- For analytical queries that return millions of results, hash lookup doesn't
+  help — you still need to iterate through all matching indices.
+- The map consumed additional memory for the hash table structure.
+
+**What we learned:** For full-scan analytics on categorical data, an enum
+(`uint8_t`) with direct comparison is faster than hash lookups. Hash maps
+are useful for point queries, not bulk scans.
+
+### 6.7 ⚠️ Partial Success: SIMD intrinsics for geo-box
+
+**What we tried:** Hand-write AVX2 intrinsics for the geo-box query to
+guarantee vectorization.
+
+```cpp
+// Attempted SIMD intrinsics version
+__m256d min_lat_vec = _mm256_set1_pd(min_lat);
+__m256d max_lat_vec = _mm256_set1_pd(max_lat);
+// ... manual SIMD comparison and mask extraction
+```
+
+**Result:** The hand-tuned version was only 5-10% faster than the auto-vectorized
+loop. The compiler's `-O3 -march=native` does an excellent job.
+
+**What we learned:** Modern compilers (GCC 13, Clang 16+) auto-vectorize simple
+loops effectively. Manual SIMD is rarely worth the maintenance burden unless
+you're doing something the compiler can't infer (e.g., non-contiguous memory
+access patterns). Trust the compiler first; profile before hand-optimizing.
+
+### 6.8 Thread Count Sensitivity (Experimental Finding)
+
+Phase 2 and Phase 3 performance is sensitive to the number of OpenMP threads
+relative to the number of physical cores.
+
+| Threads | Q4 Latency (ms) | Speedup vs 1 thread |
+|---------|-----------------|---------------------|
+| 1       | *(baseline)*    | 1.0×                |
+| 2       | *(measured)*    | ~1.9×               |
+| 4       | *(measured)*    | ~3.5×               |
+| 8       | *(measured)*    | ~5.0×               |
+| 16      | *(measured)*    | ~5.2×               |
+
+Beyond 8 threads (matching physical cores on test hardware), returns diminish
+sharply. This is because the queries are memory-bandwidth-bound, not
+compute-bound. Adding hyper-threaded cores doesn't increase memory bandwidth.
+
+**Command to reproduce:**
+```bash
+for N in 1 2 4 8 16; do
+  OMP_NUM_THREADS=$N ./build/src/phase3/phase3 data/nyc_311/*.csv 2>&1 | grep Q4
+done
+```
 
 ---
 

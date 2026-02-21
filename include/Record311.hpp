@@ -156,6 +156,29 @@ struct Record311 {
     }
 
     // -----------------------------------------------------------------------
+    // Helper: Remove commas from numeric strings (e.g., "1,029,444" → "1029444")
+    // -----------------------------------------------------------------------
+    static std::string removeCommas(const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            if (c != ',') result += c;
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: Extract leading digits from a string (e.g., "Precinct 106" → "106")
+    // -----------------------------------------------------------------------
+    static std::string extractDigits(const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c >= '0' && c <= '9') result += c;
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
     // fromFields — called by CSVParser<Record311>::readNext()
     // Maps the 44-column Socrata CSV row to the struct fields.
     // Returns false if the row cannot be parsed (e.g. missing unique_key).
@@ -206,22 +229,27 @@ struct Record311 {
             catch (...) { r.council_district = 0; }
         }
 
-        // police_precinct (col 26)
+        // police_precinct (col 26) — may contain "Precinct NN" text
         if (!f[26].empty()) {
-            try { r.police_precinct = static_cast<uint16_t>(std::stoul(f[26])); }
+            try {
+                std::string digits = extractDigits(f[26]);
+                if (!digits.empty()) {
+                    r.police_precinct = static_cast<uint16_t>(std::stoul(digits));
+                }
+            }
             catch (...) { r.police_precinct = 0; }
         }
 
         // f[27] = bbl (skipped)
         r.borough = boroughFromString(f[28]);
 
-        // x/y State Plane (cols 29, 30)
+        // x/y State Plane (cols 29, 30) — may have thousands separators like "1,029,444"
         if (f.size() > 29 && !f[29].empty()) {
-            try { r.x_coord = static_cast<int32_t>(std::stol(f[29])); }
+            try { r.x_coord = static_cast<int32_t>(std::stol(removeCommas(f[29]))); }
             catch (...) { r.x_coord = 0; }
         }
         if (f.size() > 30 && !f[30].empty()) {
-            try { r.y_coord = static_cast<int32_t>(std::stol(f[30])); }
+            try { r.y_coord = static_cast<int32_t>(std::stol(removeCommas(f[30]))); }
             catch (...) { r.y_coord = 0; }
         }
 

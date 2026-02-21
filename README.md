@@ -6,6 +6,42 @@
 
 ---
 
+### Getting the Dataset (~12 GB)
+
+The CSV files are **not** included in this repository due to size. Each teammate must download the data:
+
+#### Option A: Download from NYC Open Data (Recommended)
+1. Go to [NYC 311 Service Requests (2020–Present)](https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9)
+2. Click **Export** → **CSV**
+3. Save the file(s) to `data/nyc_311/` in this project
+
+#### Option B: Download via API (faster, yearly splits)
+```bash
+mkdir -p data/nyc_311
+cd data/nyc_311
+
+# Download by year (adjust years as needed)
+for YEAR in 2020 2021 2022 2023 2024 2025; do
+  curl -o "311_${YEAR}.csv" \
+    "https://data.cityofnewyork.us/resource/erm2-nwe9.csv?\$where=created_date%20between%20'${YEAR}-01-01'%20and%20'${YEAR}-12-31'&\$limit=50000000"
+done
+```
+
+#### Option C: Team shared link
+> **Google Drive:** [Add your shared link here if you upload the files]
+
+After downloading, your `data/` folder should look like:
+```
+data/
+  nyc_311/
+    311_2020.csv
+    311_2021.csv
+    ...
+  generate_sample.py
+```
+
+---
+
 ### Build
 
 Requires: g++ ≥ 13 (or clang ≥ 16), CMake ≥ 3.16, OpenMP.
