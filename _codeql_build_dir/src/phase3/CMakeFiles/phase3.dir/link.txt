@@ -1,0 +1,1 @@
+/home/runner/work/CMPE-273-MINI1-ANU/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++ -O3 -march=native -DNDEBUG -Wl,--dependency-file=CMakeFiles/phase3.dir/link.d CMakeFiles/phase3.dir/main.cpp.o -o phase3  /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a
