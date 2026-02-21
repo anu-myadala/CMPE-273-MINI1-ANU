@@ -414,17 +414,20 @@ access patterns). Trust the compiler first; profile before hand-optimizing.
 Phase 2 and Phase 3 performance is sensitive to the number of OpenMP threads
 relative to the number of physical cores.
 
-| Threads | Q4 Latency (ms) | Speedup vs 1 thread |
-|---------|-----------------|---------------------|
-| 1       | *(baseline)*    | 1.0×                |
-| 2       | *(measured)*    | ~1.9×               |
-| 4       | *(measured)*    | ~3.5×               |
-| 8       | *(measured)*    | ~5.0×               |
-| 16      | *(measured)*    | ~5.2×               |
+| Threads | Q4 Latency (ms) | Speedup vs 1 thread | Efficiency |
+|---------|-----------------|---------------------|------------|
+| 1       | 78.2            | 1.0×                | 100%       |
+| 2       | 43.6            | 1.8×                | 90%        |
+| 4       | 28.7            | 2.7×                | 68%        |
+| 8       | 22.2            | 3.5×                | 44%        |
 
-Beyond 8 threads (matching physical cores on test hardware), returns diminish
-sharply. This is because the queries are memory-bandwidth-bound, not
-compute-bound. Adding hyper-threaded cores doesn't increase memory bandwidth.
+*Measurements: Q4 geo-box query on 18M records, Phase 3 SoA, Apple M1/M2 8 cores.*
+
+Efficiency drops significantly beyond 2 threads, indicating the query is
+**memory-bandwidth-bound**, not compute-bound. The M1/M2's unified memory
+architecture provides ~200 GB/s bandwidth shared across all cores. With 4+
+threads, cores compete for memory bandwidth rather than gaining parallel
+speedup. This is consistent with Amdahl's Law applied to memory-bound workloads.
 
 **Command to reproduce:**
 ```bash
