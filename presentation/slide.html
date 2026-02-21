@@ -231,10 +231,10 @@
   <!-- ═══════════════════════ HEADER ═══════════════════════ -->
   <header>
     <h1>Data Layout Beats Parallelism:<br>
-      <span class="highlight">SoA Outperforms OpenMP AoS by 5–8× on Numeric Queries</span>
+      <span class="highlight">SoA Achieves 125× Speedup — OpenMP Alone Only 20%</span>
     </h1>
     <div class="sub">
-      CMPE-273 Mini 1 &nbsp;|&nbsp; NYC 311 Service Requests 2020–2024 (20M records, 12 GB)
+      CMPE-273 Mini 1 &nbsp;|&nbsp; NYC 311 Service Requests 2020–2025 (18M records, 12 GB)
       &nbsp;|&nbsp; Anu Myadala
     </div>
   </header>
@@ -246,132 +246,129 @@
     <div class="panel finding">
       <h2>The Finding</h2>
 
-      <div class="big-stat">~8×</div>
+      <div class="big-stat">125×</div>
       <div class="big-label">
-        faster geographic bounding-box queries<br>
+        faster date-range queries<br>
         in Phase 3 (SoA) vs Phase 1 (Serial AoS)
       </div>
 
       <p>
-        A geo-box query over 20 million records only needs
-        <strong>latitude</strong> and <strong>longitude</strong> — 16 bytes
-        per record. In Array-of-Structures (AoS), each record is
-        ~500 bytes wide: the CPU must load and discard <strong>97% of
-        every cache line</strong> to reach those 16 bytes.
+        A date-range query over 18 million records only needs
+        <strong>created_ymd</strong> — 4 bytes per record. In Array-of-Structures
+        (AoS), each record is ~500 bytes wide: the CPU must load and discard
+        <strong>98% of every cache line</strong> to reach those 4 bytes.
       </p>
       <p>
-        Structure-of-Arrays (SoA) stores all latitudes together and all
-        longitudes together. The same query now reads two tight
-        <code>double[]</code> streams that fit in L3 cache — and GCC 13
-        auto-vectorises them with 256-bit AVX2 SIMD instructions.
+        Structure-of-Arrays (SoA) stores all dates in a contiguous
+        <code>uint32_t[]</code> array (72 MB) that fits entirely in L3 cache.
+        The query drops from <strong>1,196 ms to 9.6 ms</strong>.
       </p>
 
       <div class="why-box">
         <strong>Why this matters beyond this assignment:</strong>
         Urban analytics systems — real-time 311 dashboards, GIS services,
-        emergency dispatch — run geo-filter queries continuously.
-        An 8× latency reduction means the difference between a 40 ms
-        interactive response and a 5 ms one on live city data.
+        emergency dispatch — run filter queries continuously.
+        A 125× latency reduction means sub-10ms responses on 18M live records,
+        enabling truly interactive city data exploration.
       </div>
     </div>
 
     <!-- ── MIDDLE: Performance Chart ── -->
     <div class="panel">
-      <h2>Query Latency Comparison (relative to Phase 1 = 100%)</h2>
+      <h2>Query Latency Comparison (actual measurements)</h2>
       <p style="font-size:0.75rem;color:#555;margin-bottom:10px;">
-        Based on 12-run averages. Actual values from your hardware run
-        replace these representative ratios.
+        18,072,263 records | 8 OpenMP threads | Mean of 12 runs
       </p>
 
       <div class="chart-area">
-        <!-- Q1 Borough filter -->
+        <!-- Q5 Date Range - BEST -->
         <div style="margin-bottom:14px;">
           <div style="font-size:0.72rem;font-weight:700;color:#333;margin-bottom:4px;">
-            Q1 — Borough filter (enum scan)
+            Q5 — Date range (uint32 scan) ← <em style="color:#2ca02c;">125× speedup!</em>
           </div>
           <div class="chart-row">
             <div class="qlabel">Serial AoS</div>
             <div class="bar-wrap">
               <div class="bar bar-p1" style="width:100%">
-                <span class="val">100%</span>
+                <span class="val">1,196ms</span>
               </div>
             </div>
           </div>
           <div class="chart-row">
             <div class="qlabel">OpenMP AoS</div>
             <div class="bar-wrap">
-              <div class="bar bar-p2" style="width:52%">
-                <span class="val">~52%</span>
+              <div class="bar bar-p2" style="width:78%">
+                <span class="val">933ms</span>
               </div>
             </div>
           </div>
           <div class="chart-row">
             <div class="qlabel">SoA</div>
             <div class="bar-wrap">
-              <div class="bar bar-p3" style="width:22%">
-                <span class="val">~22%</span>
+              <div class="bar bar-p3" style="width:1%">
+                <span class="val">9.6ms</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Q3 Zip Range -->
+        <div style="margin-bottom:14px;">
+          <div style="font-size:0.72rem;font-weight:700;color:#333;margin-bottom:4px;">
+            Q3 — Zip range (uint32 scan) ← <em>91× speedup</em>
+          </div>
+          <div class="chart-row">
+            <div class="qlabel">Serial AoS</div>
+            <div class="bar-wrap">
+              <div class="bar bar-p1" style="width:100%">
+                <span class="val">1,166ms</span>
+              </div>
+            </div>
+          </div>
+          <div class="chart-row">
+            <div class="qlabel">OpenMP AoS</div>
+            <div class="bar-wrap">
+              <div class="bar bar-p2" style="width:81%">
+                <span class="val">945ms</span>
+              </div>
+            </div>
+          </div>
+          <div class="chart-row">
+            <div class="qlabel">SoA</div>
+            <div class="bar-wrap">
+              <div class="bar bar-p3" style="width:1%">
+                <span class="val">12.8ms</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Q4 Geo box -->
-        <div style="margin-bottom:14px;">
-          <div style="font-size:0.72rem;font-weight:700;color:#333;margin-bottom:4px;">
-            Q4 — Geo bounding box (double scan) ← <em>biggest gain</em>
-          </div>
-          <div class="chart-row">
-            <div class="qlabel">Serial AoS</div>
-            <div class="bar-wrap">
-              <div class="bar bar-p1" style="width:100%">
-                <span class="val">100%</span>
-              </div>
-            </div>
-          </div>
-          <div class="chart-row">
-            <div class="qlabel">OpenMP AoS</div>
-            <div class="bar-wrap">
-              <div class="bar bar-p2" style="width:42%">
-                <span class="val">~42%</span>
-              </div>
-            </div>
-          </div>
-          <div class="chart-row">
-            <div class="qlabel">SoA</div>
-            <div class="bar-wrap">
-              <div class="bar bar-p3" style="width:12%">
-                <span class="val">~12%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Q2 String scan -->
         <div>
           <div style="font-size:0.72rem;font-weight:700;color:#333;margin-bottom:4px;">
-            Q2 — Complaint type (string scan) ← SoA helps less
+            Q4 — Geo bounding box (2× double scan) ← <em>51× speedup</em>
           </div>
           <div class="chart-row">
             <div class="qlabel">Serial AoS</div>
             <div class="bar-wrap">
               <div class="bar bar-p1" style="width:100%">
-                <span class="val">100%</span>
+                <span class="val">1,210ms</span>
               </div>
             </div>
           </div>
           <div class="chart-row">
             <div class="qlabel">OpenMP AoS</div>
             <div class="bar-wrap">
-              <div class="bar bar-p2" style="width:55%">
-                <span class="val">~55%</span>
+              <div class="bar bar-p2" style="width:79%">
+                <span class="val">956ms</span>
               </div>
             </div>
           </div>
           <div class="chart-row">
             <div class="qlabel">SoA</div>
             <div class="bar-wrap">
-              <div class="bar bar-p3" style="width:38%">
-                <span class="val">~38%</span>
+              <div class="bar bar-p3" style="width:2%">
+                <span class="val">23.5ms</span>
               </div>
             </div>
           </div>
@@ -385,10 +382,9 @@
       </div>
 
       <div style="margin-top:16px;padding:10px;background:#f3f8ff;border-radius:4px;font-size:0.76rem;color:#333;line-height:1.5;">
-        <strong>Key insight:</strong> SoA beats OpenMP AoS on <em>every</em>
-        numeric query — even at the same thread count. Adding OpenMP to SoA
-        (Phase 3) stacks on top: both cache efficiency <em>and</em>
-        multi-core scaling apply simultaneously.
+        <strong>Key insight:</strong> OpenMP on AoS (Phase 2) yields only ~20% improvement.
+        SoA (Phase 3) achieves 29–125× speedup because it eliminates 98% cache-line waste.
+        <strong>Memory layout matters more than threading.</strong>
       </div>
     </div>
 
@@ -396,55 +392,54 @@
     <div class="panel insight">
       <h2>What the 311 Data Reveals</h2>
 
-      <p>20 million requests spanning 2020–2024 expose measurable
+      <p>18 million requests spanning 2020–2025 expose measurable
       patterns in how New Yorkers interact with city services.</p>
 
       <div class="stat-row">
         <div class="num">28%</div>
         <div class="desc">of all requests come from <strong>Brooklyn</strong>
-        — NYC's most populous borough — yet it ranks 3rd in per-capita
-        resolution speed.</div>
+        — NYC's most populous borough (5.4M of 18M total requests).</div>
       </div>
       <div class="stat-row">
         <div class="num">#1</div>
-        <div class="desc"><strong>HEAT/HOT WATER</strong> dominates the Bronx
-        and Brooklyn — a persistent housing-code enforcement challenge,
-        especially in winters 2020–2022.</div>
+        <div class="desc"><strong>Illegal Parking</strong> is the top complaint
+        (2.5M requests), followed by Noise - Residential (2M) and
+        HEAT/HOT WATER (1.4M).</div>
       </div>
       <div class="stat-row">
-        <div class="num">↑40%</div>
-        <div class="desc"><strong>Noise - Residential</strong> complaints
-        spiked 40% in March–April 2020 (COVID stay-at-home) and remained
-        elevated through 2021.</div>
+        <div class="num">2.8ms</div>
+        <div class="desc"><strong>Centroid computation</strong> for 18M lat/lon
+        pairs completes in under 3ms using OpenMP SIMD reduction —
+        enabling real-time geographic analytics.</div>
       </div>
 
       <div style="margin-top:12px;font-size:0.72rem;font-weight:700;color:#003087;margin-bottom:6px;">
-        Request share by borough
+        Request share by borough (18M records)
       </div>
       <div class="borough-bar-row">
         <div class="bname">Brooklyn</div>
         <div class="bbar" style="width:130px"></div>
-        <div class="bpct">~28%</div>
+        <div class="bpct">30%</div>
       </div>
       <div class="borough-bar-row">
         <div class="bname">Queens</div>
-        <div class="bbar" style="width:110px"></div>
-        <div class="bpct">~24%</div>
+        <div class="bbar" style="width:104px"></div>
+        <div class="bpct">24%</div>
+      </div>
+      <div class="borough-bar-row">
+        <div class="bname">Bronx</div>
+        <div class="bbar" style="width:92px"></div>
+        <div class="bpct">22%</div>
       </div>
       <div class="borough-bar-row">
         <div class="bname">Manhattan</div>
         <div class="bbar" style="width:88px"></div>
-        <div class="bpct">~19%</div>
-      </div>
-      <div class="borough-bar-row">
-        <div class="bname">Bronx</div>
-        <div class="bbar" style="width:88px"></div>
-        <div class="bpct">~19%</div>
+        <div class="bpct">20%</div>
       </div>
       <div class="borough-bar-row">
         <div class="bname">Staten Island</div>
-        <div class="bbar" style="width:24px"></div>
-        <div class="bpct">~5%</div>
+        <div class="bbar" style="width:18px"></div>
+        <div class="bpct">4%</div>
       </div>
 
       <div style="margin-top:12px;font-size:0.76rem;color:#444;line-height:1.5;">
@@ -452,7 +447,7 @@
         answering "which zip codes had the most unresolved HEAT complaints
         in winter 2022?" requires a date-range + status + borough scan —
         exactly the multi-column numeric filter where SoA eliminates
-        ~97% of wasted memory bandwidth vs AoS.
+        ~98% of wasted memory bandwidth vs AoS.
       </div>
     </div>
 
@@ -468,7 +463,7 @@
       Dataset: <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9">
         NYC OpenData 311 Service Requests 2020–Present
       </a>
-      &nbsp;|&nbsp; g++ 13.3 · OpenMP 4.5 · CMake 3.16 · C++17
+      &nbsp;|&nbsp; Clang 21 · OpenMP 5.1 · CMake 4.2 · C++17
     </div>
   </footer>
 

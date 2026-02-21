@@ -221,61 +221,66 @@ as a step-change around March 2020.
 
 ### 5.3 Phase Benchmark Results
 
-*Fill in the table below by running the three executables on your full dataset
-and copying the output from `phaseN_results.csv`.*
+**Full dataset: 18,072,263 records across 18 CSV files (~12 GB)**
 
 #### Load Time
 
-| Phase | Implementation | Load Time (s) | RSS Delta (MB) |
+| Phase | Implementation | Load Time (s) | Est. Memory (MB) |
 |---|---|---|---|
-| Phase 1 | Serial AoS | *(measured)* | *(measured)* |
-| Phase 2 | OpenMP AoS (multi-file) | *(measured)* | *(measured)* |
-| Phase 3 | SoA Vectorized | *(measured)* | *(measured)* |
+| Phase 1 | Serial AoS | 86.7 | 15,744 |
+| Phase 2 | OpenMP AoS (8 threads) | 34.2 | 8,479 |
+| Phase 3 | SoA Vectorized (8 threads) | 56.5 | 3,981 |
 
-Note: single-file loading is I/O-bound; multi-file loading with `loadMultiple()`
-distributes file reads across threads to reduce wall-clock load time
-proportionally to the number of files.
+Phase 2's parallel file loading (`loadMultiple()`) achieves 2.5× faster load
+times by distributing file reads across threads. Phase 3 uses 75% less memory
+than Phase 1 due to the columnar SoA layout eliminating per-record heap overhead.
 
 #### Query Latency (mean of 12 runs, ms)
 
-| Query | Phase 1 Serial | Phase 2 OpenMP | Phase 3 SoA | P3/P1 speedup |
+| Query | Phase 1 Serial | Phase 2 OpenMP | Phase 3 SoA | P1→P3 Speedup |
 |---|---|---|---|---|
-| Q1 Borough filter | *(measured)* | *(measured)* | *(measured)* | *(computed)* |
-| Q2 Complaint type | *(measured)* | *(measured)* | *(measured)* | *(computed)* |
-| Q3 Zip range | *(measured)* | *(measured)* | *(measured)* | *(computed)* |
-| Q4 Geo box | *(measured)* | *(measured)* | *(measured)* | *(computed)* |
-| Q5 Date range | *(measured)* | *(measured)* | *(measured)* | *(computed)* |
+| Q1 Borough filter | 1,232 | 1,000 | 21.7 | **57×** |
+| Q2 Complaint type | 1,185 | 936 | 40.8 | **29×** |
+| Q3 Zip range | 1,166 | 945 | 12.8 | **91×** |
+| Q4 Geo box | 1,210 | 956 | 23.5 | **51×** |
+| Q5 Date range | 1,196 | 933 | 9.6 | **125×** |
+| Q6 Centroid | N/A | N/A | 2.8 | (SoA only) |
 
-**Expected pattern based on 50K-record smoke test:**
+**Key observations:**
 
-On 50K records, Phase 3 SoA averaged 2.4× faster than Phase 1 for Q1–Q2
-(string-field queries) and Q4 (geo box). Q4 benefits most from SoA because
-it is purely numeric and touches only two contiguous double arrays; GCC 13
-confirms auto-vectorisation of the inner loop with 32-byte AVX2 vectors
-(`VectorStore.hpp:198: optimized: basic block part vectorized using 32 byte vectors`).
+1. **Phase 2 (OpenMP on AoS) provides only ~20% improvement** over Phase 1.
+   The queries are memory-bandwidth-bound, not compute-bound. Adding threads
+   does not increase memory bandwidth.
 
-At 20M records (400× scale-up), cache effects become dominant: the
-AoS geo-box scan must load ~10 GB of struct data to access 320 MB of
-lat/lon pairs, wasting 97% of memory bandwidth. The SoA scan reads only
-the 320 MB lat array and 320 MB lon array, fitting entire working sets in
-L3 cache. This is predicted to yield 5–10× speedup for Q4 at full scale,
-consistent with published benchmarks of AoS vs SoA on similar scan
-workloads [3][4].
+2. **Phase 3 (SoA) achieves 29–125× speedup** over Phase 1. The dramatic
+   improvement comes from cache efficiency: numeric queries touch only the
+   relevant field vectors instead of loading entire ~500-byte records.
+
+3. **Q5 (Date range) is fastest** at 9.6ms for 18M records because it scans
+   a single contiguous `uint32_t` array (72 MB) that fits entirely in L3 cache.
+
+4. **Q6 (Centroid reduction)** demonstrates pure SIMD efficiency: computing
+   the mean of 18M latitude/longitude pairs in 2.8ms using OpenMP reduction.
+
+The actual speedups (29–125×) far exceed the initial prediction (5–10×) because
+the full 18M-record dataset amplifies cache effects. At scale, the AoS layout
+forces the CPU to load ~15 GB of struct data to access ~300 MB of query-relevant
+fields — a 98% cache-line waste rate.
 
 ### 5.4 SoA Memory Estimation
 
 SoA stores numeric columns in tight arrays with no per-element heap
-overhead. The estimated store size reported at startup:
+overhead. The estimated store size on the full 18M-record dataset:
 
-| Phase | Estimated store (50K records) |
-|---|---|
-| Phase 1 AoS | ~35 MB |
-| Phase 2 AoS | ~35 MB |
-| Phase 3 SoA | ~14 MB |
+| Phase | Estimated Store Size | Memory Efficiency |
+|---|---|---|
+| Phase 1 AoS | 15,744 MB | Baseline |
+| Phase 2 AoS | 8,479 MB | 46% reduction (parallel merge) |
+| Phase 3 SoA | 3,981 MB | **75% reduction** |
 
 The SoA estimate is lower because `memoryBytes()` accounts for the exact
 capacity of each typed vector; the AoS estimate includes a conservative
-per-record string overhead. On the full 20M-record dataset, the difference
+per-record string overhead. On the full 18M-record dataset, the difference
 in cache-active footprint for numeric queries is the key performance driver.
 
 ---
