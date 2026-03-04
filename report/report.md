@@ -2,7 +2,7 @@
 ## NYC 311 Service Requests: High-Performance In-Memory Analytics
 
 **Course:** CMPE-273 — Performance-Based Multi-Process Computing  
-**Dataset:** NYC 311 Service Requests, 2020–present  
+**Dataset:** NYC 311 Service Requests, 2020–present     
 **Source:** https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9
 
 ---
@@ -86,7 +86,7 @@ countByComplaintType(top_n)          → map<string, size_t>
 Returning index vectors rather than copies of records avoids allocating
 large intermediate buffers; callers can materialise records on demand via
 `at(idx)`. This also allows the compiler to optimise the inner scan loop
-independently of what the caller does with results.
+independently of what the caller does with results. 
 
 ### 3.2 Template CSV Parser
 
