@@ -6,7 +6,7 @@ charts suitable for the report.
 
 Usage:
     python3 python/plot_benchmarks.py
-
+ 
 Output files (in ./plots/):
     query_comparison.png  — grouped bar chart, mean query time per phase
     speedup.png           — speedup of Phase 2 and 3 relative to Phase 1
