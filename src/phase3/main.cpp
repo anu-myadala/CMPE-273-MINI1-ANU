@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
     std::cout << "RSS delta      : "
               << (mem_after.rss_kb - mem_before.rss_kb) / 1024 << " MB\n";
     printSeparator();
-
+ 
     // Borough distribution
     for (const auto& kv : store.countByBorough()) {
         std::cout << "  " << std::setw(15) << std::left << kv.first
