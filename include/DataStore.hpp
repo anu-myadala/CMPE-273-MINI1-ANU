@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
 #include "CSVParser.hpp"
 #include "IDataStore.hpp"
 #include "Record311.hpp"
