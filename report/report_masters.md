@@ -24,7 +24,7 @@
 
 This report presents a comprehensive investigation into the performance characteristics of in-memory data analytics systems when processing large-scale urban service request data. Using the New York City 311 Service Requests dataset—comprising over 18 million records and approximately 12 gigabytes of raw CSV data—we systematically evaluate the impact of memory layout strategies and thread-level parallelism on query latency and memory efficiency.
 
-Our investigation proceeds through three distinct implementation phases: a serial Array-of-Structures (AoS) baseline, an OpenMP-parallelized AoS implementation, and a Structure-of-Arrays (SoA) implementation with SIMD vectorization. The empirical results demonstrate that memory layout optimization yields substantially greater performance improvements than parallelization alone. Specifically, the SoA implementation achieves query latencies between 9.6 and 40.8 milliseconds on 18 million records, representing speedup factors of 29× to 125× compared to the serial baseline. In contrast, adding eight-thread parallelism to the AoS layout provides only a 20% improvement, revealing that the workload is fundamentally memory-bandwidth-bound rather than compute-bound.
+Our investigation proceeds through three distinct implementation phases: a serial Array-of-Structures (AoS) baseline, an OpenMP-parallelized AoS implementation, and a Structure-of-Arrays (SoA) implementation with SIMD vectorization. The empirical results demonstrate that memory layout optimization yields substantially greater performance improvements than parallelization alone. Specifically, the SoA implementation achieves query latencies between 9.7 and 29.4 milliseconds on 18 million records, representing speedup factors of 39× to 119× compared to the serial baseline. In contrast, adding eight-thread parallelism to the AoS layout provides only a 20% improvement, revealing that the workload is fundamentally memory-bandwidth-bound rather than compute-bound.
 
 These findings have significant implications for the design of real-time urban analytics systems, where sub-10-millisecond query response times can enable truly interactive exploration of city-scale datasets.
 
@@ -422,9 +422,9 @@ The following table presents data loading times for the complete 18-million-reco
 
 | Phase | Implementation | Load Time (seconds) | Memory Footprint (MB) |
 |-------|----------------|--------------------|-----------------------|
-| Phase 1 | Serial AoS | 86.7 | 15,744 |
-| Phase 2 | Parallel AoS (8 threads) | 34.2 | 8,479 |
-| Phase 3 | Parallel SoA (8 threads) | 56.5 | 3,981 |
+| Phase 1 | Serial AoS | 102.9 | 15,744 |
+| Phase 2 | Parallel AoS (8 threads) | 45.8 | 8,479 |
+| Phase 3 | Parallel SoA (8 threads) | 57.9 | 3,981 |
 
 Phase 2 achieves the fastest load time due to its file-level parallelism, which overlaps I/O and parsing across multiple threads. Phase 3's load time is intermediate because the SoA transformation requires additional processing to distribute parsed fields into separate vectors. However, Phase 3's memory footprint is dramatically smaller—only 25% of Phase 1's footprint—due to the elimination of per-record object overhead and the tight packing of homogeneous arrays.
 
@@ -434,14 +434,14 @@ The following table presents mean query latencies across 12 iterations:
 
 | Query | Phase 1 (ms) | Phase 2 (ms) | Phase 3 (ms) | P1→P3 Speedup |
 |-------|--------------|--------------|--------------|---------------|
-| Q1: Borough filter | 1,232 | 1,000 | 21.7 | **56.8×** |
-| Q2: Complaint type | 1,185 | 936 | 40.8 | **29.0×** |
-| Q3: ZIP range | 1,166 | 945 | 12.8 | **91.1×** |
-| Q4: Geo-box | 1,210 | 956 | 23.5 | **51.5×** |
-| Q5: Date range | 1,196 | 933 | 9.6 | **124.6×** |
-| Q6: Centroid | N/A | N/A | 2.8 | (SoA only) |
+| Q1: Borough filter | 1,156 | 932 | 20.9 | **55.3×** |
+| Q2: Complaint type | 1,150 | 927 | 29.4 | **39.1×** |
+| Q3: ZIP range | 1,132 | 934 | 20.9 | **54.2×** |
+| Q4: Geo-box | 1,187 | 993 | 26.8 | **44.3×** |
+| Q5: Date range | 1,159 | 933 | 9.7 | **119.5×** |
+| Q6: Centroid | N/A | N/A | 2.7 | (SoA only) |
 
-These results validate our hypothesis that SoA layout dramatically outperforms AoS for selective-column queries. The speedup factors range from 29× (Q2, string comparison) to 125× (Q5, date range), with the variation attributable to differences in field size and comparability to SIMD optimization.
+These results validate our hypothesis that SoA layout dramatically outperforms AoS for selective-column queries. The speedup factors range from 39× (Q2, string comparison) to 119× (Q5, date range), with the variation attributable to differences in field size and comparability to SIMD optimization.
 
 ### 7.3 Analysis of Phase 2 Performance
 
@@ -459,7 +459,7 @@ Phase 3's dramatic performance improvement stems from two synergistic effects:
 
 2. **SIMD vectorization:** The contiguous, aligned layout of field vectors enables the compiler to generate AVX2 vector instructions. The date-range loop processes eight `uint32_t` values per SIMD instruction, effectively multiplying throughput by 8×.
 
-The combined effect of these optimizations explains the observed speedup factors. For Q5, the 125× speedup can be decomposed as approximately 31× from reduced memory traffic (9 GB → 288 MB, accounting for dual-field access in some queries) and 4× from SIMD vectorization, with additional contributions from improved branch prediction and cache prefetching on the linear access pattern.
+The combined effect of these optimizations explains the observed speedup factors. For Q5, the 119× speedup can be decomposed as approximately 30× from reduced memory traffic (9 GB → 288 MB, accounting for dual-field access in some queries) and 4× from SIMD vectorization, with additional contributions from improved branch prediction and cache prefetching on the linear access pattern.
 
 ### 7.5 Thread Scaling Analysis
 
@@ -601,7 +601,7 @@ Several limitations of our study warrant acknowledgment:
 
 This project makes the following contributions:
 
-1. **Quantitative demonstration of SoA benefits:** We provide rigorous measurements showing that SoA layout achieves 29-125× speedup over AoS for analytical filter queries on 18 million records.
+1. **Quantitative demonstration of SoA benefits:** We provide rigorous measurements showing that SoA layout achieves 39-119× speedup over AoS for analytical filter queries on 18 million records.
 
 2. **Analysis of parallelism limitations:** We demonstrate that OpenMP parallelization of AoS provides only 20% improvement due to memory bandwidth saturation.
 

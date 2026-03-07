@@ -202,8 +202,7 @@ Typical distribution across the 2020–2024 dataset:
 | UNSPECIFIED | ~1.0M | 5% |
 
 Brooklyn generates the highest absolute volume of service requests,
-consistent with it being NYC's most populous borough (population ≈ 2.7M
-per 2020 census [1]).
+consistent with it being NYC's most populous borough.
 
 ### 5.2 Top Complaint Types
 
@@ -215,8 +214,8 @@ per 2020 census [1]).
 | 4 | Blocked Driveway | Queens/Brooklyn concentrated |
 | 5 | Street Light Condition | DOT workload driver |
 
-The surge in "Noise - Residential" complaints in 2020–2021 is a documented
-effect of COVID-19 stay-at-home orders [2]. This is visible in the dataset
+The surge in "Noise - Residential" complaints in 2020–2021 reflects 
+COVID-19 stay-at-home effects. This is visible in the dataset
 as a step-change around March 2020.
 
 ### 5.3 Phase Benchmark Results
@@ -227,11 +226,11 @@ as a step-change around March 2020.
 
 | Phase | Implementation | Load Time (s) | Est. Memory (MB) |
 |---|---|---|---|
-| Phase 1 | Serial AoS | 86.7 | 15,744 |
-| Phase 2 | OpenMP AoS (8 threads) | 34.2 | 8,479 |
-| Phase 3 | SoA Vectorized (8 threads) | 56.5 | 3,981 |
+| Phase 1 | Serial AoS | 102.9 | 15,744 |
+| Phase 2 | OpenMP AoS (8 threads) | 45.8 | 8,479 |
+| Phase 3 | SoA Vectorized (8 threads) | 57.9 | 3,981 |
 
-Phase 2's parallel file loading (`loadMultiple()`) achieves 2.5× faster load
+Phase 2's parallel file loading (`loadMultiple()`) achieves 2.2× faster load
 times by distributing file reads across threads. Phase 3 uses 75% less memory
 than Phase 1 due to the columnar SoA layout eliminating per-record heap overhead.
 
@@ -239,12 +238,12 @@ than Phase 1 due to the columnar SoA layout eliminating per-record heap overhead
 
 | Query | Phase 1 Serial | Phase 2 OpenMP | Phase 3 SoA | P1→P3 Speedup |
 |---|---|---|---|---|
-| Q1 Borough filter | 1,232 | 1,000 | 21.7 | **57×** |
-| Q2 Complaint type | 1,185 | 936 | 40.8 | **29×** |
-| Q3 Zip range | 1,166 | 945 | 12.8 | **91×** |
-| Q4 Geo box | 1,210 | 956 | 23.5 | **51×** |
-| Q5 Date range | 1,196 | 933 | 9.6 | **125×** |
-| Q6 Centroid | N/A | N/A | 2.8 | (SoA only) |
+| Q1 Borough filter | 1,156 | 932 | 20.9 | **55×** |
+| Q2 Complaint type | 1,150 | 927 | 29.4 | **39×** |
+| Q3 Zip range | 1,132 | 934 | 20.9 | **54×** |
+| Q4 Geo box | 1,187 | 993 | 26.8 | **44×** |
+| Q5 Date range | 1,159 | 933 | 9.7 | **119×** |
+| Q6 Centroid | N/A | N/A | 2.7 | (SoA only) |
 
 **Key observations:**
 
@@ -252,17 +251,17 @@ than Phase 1 due to the columnar SoA layout eliminating per-record heap overhead
    The queries are memory-bandwidth-bound, not compute-bound. Adding threads
    does not increase memory bandwidth.
 
-2. **Phase 3 (SoA) achieves 29–125× speedup** over Phase 1. The dramatic
+2. **Phase 3 (SoA) achieves 39–119× speedup** over Phase 1. The dramatic
    improvement comes from cache efficiency: numeric queries touch only the
    relevant field vectors instead of loading entire ~500-byte records.
 
-3. **Q5 (Date range) is fastest** at 9.6ms for 18M records because it scans
+3. **Q5 (Date range) is fastest** at 9.7ms for 18M records because it scans
    a single contiguous `uint32_t` array (72 MB) that fits entirely in L3 cache.
 
 4. **Q6 (Centroid reduction)** demonstrates pure SIMD efficiency: computing
-   the mean of 18M latitude/longitude pairs in 2.8ms using OpenMP reduction.
+   the mean of 18M latitude/longitude pairs in 2.7ms using OpenMP reduction.
 
-The actual speedups (29–125×) far exceed the initial prediction (5–10×) because
+The actual speedups (39–119×) far exceed the initial prediction (5–10×) because
 the full 18M-record dataset amplifies cache effects. At scale, the AoS layout
 forces the CPU to load ~15 GB of struct data to access ~300 MB of query-relevant
 fields — a 98% cache-line waste rate.
@@ -463,46 +462,13 @@ done
 
 ---
 
-## 8. References
-
-[1] U.S. Census Bureau, "2020 Decennial Census: New York City Population by
-    Borough," https://www.census.gov, 2021.
-
-[2] Kontokosta, C.E. and Hong, B., "Bias in smart city governance: How
-    socioeconomic disparities shape the distribution of 311 complaints in
-    New York City," *Environment and Planning B*, 48(10), 2021.
-    https://doi.org/10.1177/2399808320919347
-
-[3] Drepper, U., "What Every Programmer Should Know About Memory," Red Hat,
-    2007. https://www.akkadia.org/drepper/cpumemory.pdf
-
-[4] Hennessy, J.L. and Patterson, D.A., *Computer Architecture: A
-    Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017. (Chapter 2:
-    Memory Hierarchy Design)
-
-[5] Angulo, J., "NYC 311 Complaints and Socioeconomic Inequality," Harvard
-    Kennedy School PolicyCast, 2019.
-    https://www.hks.harvard.edu/more/alumni/alumni-stories/311-complaints-and-
-    inequality-nyc
-
-[6] Williams, S., Waterman, A., and Patterson, D., "Roofline: An Insightful
-    Visual Performance Model for Floating-Point Programs and Multicore
-    Architectures," *Communications of the ACM*, 52(4), 2009.
-    https://doi.org/10.1145/1498765.1498785
-
-[7] GCC Manual — Auto-Vectorization in GCC:
-    https://gcc.gnu.org/projects/tree-ssa/vectorization.html
-
-[8] OpenMP Architecture Review Board, "OpenMP Application Programming
-    Interface v5.1," 2020. https://www.openmp.org/specifications/
-
----
-
-## 9. Individual Contributions
+## 8. Individual Contributions
 
 | Member | Contribution |
 |---|---|
-| Anu Myadala | Dataset acquisition (12 GB NYC OpenData CSVs), C++ implementation of all three phases, benchmarking, report |
+| Anukrithi Myadala | Dataset acquisition, C++ implementation of all three phases, benchmarking, report |
+| Asim Mohammed | Phase 2 OpenMP implementation, parallel file loading, thread scaling experiments |
+| Ali Ucer | CSV parser implementation, presentation design, code review |
 
 ---
 
