@@ -167,15 +167,14 @@ Brooklyn's dominance in absolute request volume is consistent with its status as
 
 ### 4.1 Design Philosophy
 
-Our system architecture reflects several guiding principles derived from the project requirements and performance optimization literature:
+Our system architecture is guided by a number of principles, many of which are drawn from the project requirements and performance optimization literature:
+1. **Separation of concerns:** The query interface is abstractly defined, allowing different storage implementations (AoS serial, AoS parallel, SoA parallel) to be substituted without modification to client code.
 
-1. **Separation of concerns:** The query interface is defined abstractly, allowing different storage implementations (AoS serial, AoS parallel, SoA parallel) to be substituted without changing client code.
+2. **Header-only implementation:** All components are implemented as header-only C++ templates, removing any link-time dependencies and allowing the compiler to perform aggressive inlining.
 
-2. **Header-only implementation:** All components are implemented as header-only C++ templates, eliminating link-time dependencies and enabling the compiler to inline aggressively.
+3. **Zero-copy result handling:** Query methods return vectors of indices, not copies of matching data, reducing intermediate allocation sizes and shifting materialization to the client.
 
-3. **Zero-copy result handling:** Query methods return vectors of indices rather than copies of matching records, avoiding large intermediate allocations and deferring materialization to the caller.
-
-4. **Statistical rigor in benchmarking:** Each query is executed multiple times, with statistical aggregation (mean, minimum, maximum, standard deviation) to account for system variability.
+4. **Statistical rigor in benchmarking:** Each query is performed multiple times, with statistical aggregation (mean, minimum, maximum, std dev) to account for system variability.
 
 ### 4.2 Abstract Interface
 
@@ -228,7 +227,7 @@ The system comprises the following major components:
 
 The `Record311` structure (defined in `include/Record311.hpp`) contains 44 fields corresponding to the dataset schema. Several design decisions merit discussion:
 
-**Date representation:** Early iterations attempted to parse dates into `time_t` values using `strptime()`, but this approach proved problematic for two reasons. First, `strptime()` is not available on all platforms (notably absent in MSVC on Windows). Second, the NYC dataset contains two distinct date formats: ISO-8601 (`YYYY-MM-DDTHH:MM:SS.sss`) and US-style (`MM/DD/YYYY HH:MM:SS AM`). Rather than implementing complex format detection, we encode dates as `uint32_t` integers in YYYYMMDD format (e.g., March 6, 2026 becomes `20260306`). This representation supports efficient range comparisons through simple integer arithmetic while avoiding platform dependencies.
+**Date representation:** Early versions tried to interpret the dates into `time_t` types by utilizing `strptime()`, but this method had issues for two reasons. Firstly, `strptime()` isn't supported on all platforms (i.e., it's not included with MSVC on Windows). Secondly, the dates in the NYC dataset come in two formats: ISO-8601 format `YYYY-MM-DDTHH:MM:SS.sss` and US format `MM/DD/YYYY HH:MM:SS AM`. Instead of trying to implement a date format detector, we convert the dates into `uint32_t` integers with the format `YYYYMMDD` (i.e., March 6, 2026 -> `20260306`).
 
 **Borough encoding:** The `borough` field is stored as an enumerated type (`enum Borough : uint8_t`) with six values: `MANHATTAN`, `BRONX`, `BROOKLYN`, `QUEENS`, `STATEN_ISLAND`, and `UNSPECIFIED`. This encoding reduces memory consumption from approximately 12 bytes per string to 1 byte per record while enabling fast integer comparison in filter queries.
 
@@ -253,7 +252,7 @@ std::vector<size_t> filterByBorough(const std::string& target) const override {
 
 This implementation serves as the performance baseline against which subsequent phases are measured. Its simplicity also facilitates correctness verification, as the logic is trivially auditable.
 
-**Memory layout analysis:** Each `Record311` instance occupies approximately 500 bytes, including string heap allocations. For 18 million records, the total memory footprint is approximately 9 GB for the record data alone, with additional overhead from `std::vector` capacity management. When executing a geo-box query that accesses only `latitude` and `longitude` (16 bytes per record), the CPU must load entire 500-byte records, resulting in approximately 97% cache-line waste.
+**Memory layout analysis:** Each `Record311` object takes up about 500 bytes, including the string heap allocation. With 18 million records, the total memory usage for the record data alone will be about 9 GB. Additionally, there will be the overhead of `std::vector` capacity management. With a geo-box query that accesses only `latitude` and `longitude` (16 bytes per record), the CPU will need to fetch entire 500-byte records. This results in about 97% cache-line waste.
 
 ### 5.3 Phase 2: OpenMP-Parallelized Array-of-Structures
 
@@ -336,9 +335,9 @@ std::vector<size_t> filterByGeoBox(double min_lat, double max_lat,
 }
 ```
 
-**Cache efficiency:** For the geo-box query, Phase 3 loads only 288 MB of data (18M × 16 bytes for two `double` fields) compared to Phase 1's 9 GB (18M × 500 bytes). This 31× reduction in memory traffic directly translates to proportional performance improvements for memory-bound queries.
+**Cache efficiency:**In the case of the geo-box query, the data required is only 288 MB, as the two columns are of type `double`, requiring 16 bytes each, whereas the data required for the query in Phase 1 is 9 GB, as each row requires 500 bytes. This is a reduction of 31 times, which is directly proportional to the performance gain.
 
-**SIMD auto-vectorization:** The contiguous, homogeneous layout of numeric field vectors enables the compiler to auto-vectorize inner loops. Compilation with `-fopt-info-vec` confirms that GCC 13 vectorizes the geo-box, zip-range, and date-range loops using 256-bit AVX2 instructions. Each SIMD instruction processes four `double` values or eight `uint32_t` values simultaneously.
+**SIMD auto-vectorization:** This contiguous and homogeneous arrangement of the numeric field vectors allows the compiler to automatically vectorize inner loops. When compiling with the `-fopt-info-vec` flag, we can verify that GCC version 13 vectorizes the geo-box loop, zip-range loop, and date-range loop using AVX2 instructions of 256 bits.Each SIMD operation can concurrently process four `double` values or eight `uint32_t` values.
 
 **Centroid computation:** Phase 3 introduces an additional query, `computeCentroid()`, which calculates the mean latitude and longitude across all records. This computation uses OpenMP reduction:
 
@@ -400,7 +399,7 @@ We designed five benchmark queries to cover a range of access patterns, data typ
 | Q5 | `filterByDateRange(20230101, 20231231)` | Single `uint32_t` field | Tests temporal filtering; calendar year 2023 |
 | Q6 | `computeCentroid()` | Two `double` fields | Tests numerical reduction (Phase 3 only) |
 
-These queries were selected to isolate the impact of data layout on queries with varying field access patterns. Q1 and Q5 access single small-integer fields, representing the best case for SoA layout. Q4 accesses two floating-point fields, testing multi-field access. Q2 involves string comparison, representing a workload less amenable to SIMD optimization.
+These queries were chosen to test the data layout’s impact on queries with different patterns of access for the fields. Q1 and Q5 access single fields containing small integer data, which is the best-case scenario for the SoA layout. Q4 checks the access of two float fields. Q2 checks for string comparison, which is less suitable for SIMD optimization.
 
 ### 6.4 Benchmarking Protocol
 
@@ -426,7 +425,7 @@ The following table presents data loading times for the complete 18-million-reco
 | Phase 2 | Parallel AoS (8 threads) | 45.8 | 8,479 |
 | Phase 3 | Parallel SoA (8 threads) | 57.9 | 3,981 |
 
-Phase 2 achieves the fastest load time due to its file-level parallelism, which overlaps I/O and parsing across multiple threads. Phase 3's load time is intermediate because the SoA transformation requires additional processing to distribute parsed fields into separate vectors. However, Phase 3's memory footprint is dramatically smaller—only 25% of Phase 1's footprint—due to the elimination of per-record object overhead and the tight packing of homogeneous arrays.
+Phase 2 results in the fastest load time due to the file-level parallelism. Phase 3's load time is moderate since the SoA transformation requires additional processing to scatter the parsed fields into different vectors. However, the memory footprint of Phase 3 is significantly smaller at 25% of Phase 1's footprint due to the removal of object overheads for each record and the compact packing of homogeneous arrays.
 
 ### 7.2 Query Latency Comparison
 
@@ -445,11 +444,11 @@ These results validate our hypothesis that SoA layout dramatically outperforms A
 
 ### 7.3 Analysis of Phase 2 Performance
 
-A striking observation is that Phase 2 (OpenMP on AoS) provides only 17-21% improvement over Phase 1, despite utilizing 8 CPU threads. This result initially appears counterintuitive—should not 8 threads provide approximately 8× speedup?
+Another interesting aspect is that Phase 2, which uses OpenMP on AoS, only provides a speedup of around 17-21% over Phase 1, despite using 8 CPU threads. This may seem counterintuitive at first glance. Does one not expect that using 8 threads would produce around eight times the speedup?
 
-The explanation lies in the memory-bound nature of the workload. Phase 1 and Phase 2 share the same memory layout, in which scanning 18 million records requires transferring approximately 9 GB of data from main memory. The Apple M2's unified memory system provides approximately 200 GB/s of bandwidth, which is shared across all cores. Even a single core can nearly saturate the memory bus when executing a simple scan loop; adding more cores does not increase available memory bandwidth.
+However, the answer is that the code is memory-bound. Both Phases 1 and 2 access memory in the same pattern, and scanning 18 million records requires moving around 9 GB of data from main memory. The Apple M2 has a unified memory architecture with a memory bandwidth of around 200 GB/s, which is shared among all CPU cores. In fact, a single core can almost saturate the memory bus with a simple loop just scanning the data; adding more cores does not increase the available memory bandwidth.
 
-This analysis is consistent with the principle that for workloads with low arithmetic intensity (few operations per byte transferred), performance is bounded by memory bandwidth, not by available compute resources. Phase 2's modest improvement likely reflects better utilization of prefetch queues and out-of-order execution resources across cores, rather than true parallel speedup.
+This is a general rule of thumb: when you have low arithmetic intensity (few operations per byte), you are memory-bound rather than CPU-bound. The small speedup obtained by Phase 2 likely comes from better utilization of the prefetch queues and out-of-order execution among the cores.
 
 ### 7.4 Analysis of Phase 3 Performance
 
